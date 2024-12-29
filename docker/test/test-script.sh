@@ -4,7 +4,10 @@
 
 PORT=8080
 
-apk add w3m
+if ! apk add w3m; then
+    echo "Failed to install w3m package"
+    exit 1
+fi
 
 echo sleeping a little to get things setteled...
 sleep 15
