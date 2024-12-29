@@ -129,6 +129,11 @@ services:
 ##############  TEST CONTAINER  ###############################################################
   test-container:
     image: alpine
+    depends_on:
+      - pg
+      - mysql
+      - speedtest-alpine-mysql
+      - speedtest-alpine-pg
     volumes:
       - ./test-script.sh:/test-script.sh
     command:
