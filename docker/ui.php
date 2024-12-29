@@ -13,38 +13,22 @@ function I(i){return document.getElementById(i);}
 $mode=getenv("MODE");
 if($mode=="standalone" || $mode=="backend"){ ?>
 var SPEEDTEST_SERVERS=[];
-<?php } elseif ($mode=="dual") {
- $jsonContent = @file_get_contents('/servers.json');
- if ($jsonContent === false) {
-     $servers = [];
- } else {
-     $servers = json_decode($jsonContent, true) ?: [];
- }
-
-	// find out my own URL
-	$protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' || $_SERVER['SERVER_PORT'] == 443) ? "https://" : "http://";
-
-	// Retrieve the host (e.g., www.example.com)
- $host = filter_var($_SERVER['HTTP_HOST'], FILTER_SANITIZE_STRING);
- $uri = filter_var($_SERVER['REQUEST_URI'], FILTER_SANITIZE_URL);
- $url = $protocol . htmlspecialchars($host) . htmlspecialchars($uri);
-	array_unshift($servers,
-			[
-				"name"=> "This Server",
-				"server"=> $url."backend/",
-				"id"=> 1,
-				"dlURL"=> "garbage.php",
-				"ulURL"=> "empty.php",
-				"pingURL"=> "empty.php",
-				"getIpURL"=> "getIP.php"
-			]
-		);
-	?>
-var SPEEDTEST_SERVERS= <?= json_encode($servers, JSON_PRETTY_PRINT) ?: '[]' ?>;
 <?php } else { ?>
 var SPEEDTEST_SERVERS= <?= file_get_contents('/servers.json') ?: '[]' ?>;
+<?php } 
+if ($mode=="dual"){ ?>
+// add own server in dual mode
+SPEEDTEST_SERVERS.unshift({
+	"name":"This Server",
+	"server":document.location.href+"backend/",
+	"id":1,
+	"dlURL":"garbage.php",
+	"ulURL":"empty.php",
+	"pingURL":"empty.php",
+	"getIpURL":"getIP.php",
+	"pingT":-1
+})
 <?php } ?>
-
 //INITIALIZE SPEED TEST
 var s=new Speedtest(); //create speed test object
 <?php if(getenv("TELEMETRY")=="true"){ ?>
