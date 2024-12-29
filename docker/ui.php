@@ -25,13 +25,9 @@ var SPEEDTEST_SERVERS=[];
 	$protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' || $_SERVER['SERVER_PORT'] == 443) ? "https://" : "http://";
 
 	// Retrieve the host (e.g., www.example.com)
-	$host = $_SERVER['HTTP_HOST'];
-
-	// Retrieve the URI (path and query string)
-	$uri = $_SERVER['REQUEST_URI'];
-
-	// Combine them to get the full URL
-	$url = $protocol . $host . $uri;
+ $host = filter_var($_SERVER['HTTP_HOST'], FILTER_SANITIZE_STRING);
+ $uri = filter_var($_SERVER['REQUEST_URI'], FILTER_SANITIZE_URL);
+ $url = $protocol . htmlspecialchars($host) . htmlspecialchars($uri);
 	array_unshift($servers,
 			[
 				"name"=> "This Server",
