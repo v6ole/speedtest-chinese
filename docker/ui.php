@@ -14,7 +14,12 @@ $mode=getenv("MODE");
 if($mode=="standalone" || $mode=="backend"){ ?>
 var SPEEDTEST_SERVERS=[];
 <?php } elseif ($mode=="dual") {
-	$servers = json_decode(file_get_contents('/servers.json'), true);
+ $jsonContent = @file_get_contents('/servers.json');
+ if ($jsonContent === false) {
+     $servers = [];
+ } else {
+     $servers = json_decode($jsonContent, true) ?: [];
+ }
 
 	// find out my own URL
 	$protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' || $_SERVER['SERVER_PORT'] == 443) ? "https://" : "http://";
