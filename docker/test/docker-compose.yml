@@ -11,7 +11,7 @@ x-shared:
       - TELEMETRY=true
 
 services:
-  ###################### POSTGRESQL ################################
+###################### POSTGRESQL ################################
   pg:
     image: postgres:alpine
     environment:
@@ -48,7 +48,7 @@ services:
     ports:
       - 9124:8080
 
-  ####################### MYSQL ##############################
+####################### MYSQL ##############################
 
   mysql:
     image: mysql:lts
@@ -88,7 +88,8 @@ services:
     ports:
       - 9126:8080
 
-  ###### SQLITE ######
+################ SQLITE ####################################
+
   speedtest-debian-sqlite:
     # check at http://localhost:9125/results/sanitycheck.php
     build:
@@ -111,6 +112,7 @@ services:
     environment: *env_vars_sqlite
     ports:
       - 9128:8080
+
   speedtest-alpine-sqlite-dual:
     <<: *speedtest-service
     build:
@@ -123,3 +125,12 @@ services:
       - ./servers.json:/servers.json:ro
     ports:
       - 9129:8080
+
+##############  TEST CONTAINER  ###############################################################
+  test-container:
+    image: alpine
+    volumes:
+      - ./test-script.sh:/test-script.sh
+    command:
+      - sh
+      - /test-script.sh

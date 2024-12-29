@@ -18,8 +18,12 @@ cp /speedtest/favicon.ico /var/www/html/
 
 # Set custom webroot on alpine
 if is_alpine; then
+  echo "ALPINE IMAGE"
   sed -i "s#\"/var/www/localhost/htdocs\"#\"/var/www/html\"#g" /etc/apache2/httpd.conf
+else
+  echo "DEBIAN IMAGE"
 fi
+
 
 # Set up backend side for standlone modes
 if [[ "$MODE" == "standalone" || "$MODE" == "dual" ]]; then
@@ -82,9 +86,9 @@ if [[ "$TELEMETRY" == "true" && ("$MODE" == "frontend" || "$MODE" == "standalone
 
   mkdir -p /database/
   if is_alpine; then
-    chown apache /database/
+    chown -R apache /database/
   else
-    chown www-data /database/
+    chown -R www-data /database/
   fi
 fi
 
