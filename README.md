@@ -1,99 +1,74 @@
 ![LibreSpeed Logo](https://github.com/librespeed/speedtest/blob/master/.logo/logo3.png?raw=true)
 
-# LibreSpeed
+# LibreSpeed 中文优化版
 
-No Flash, No Java, No Websocket, No Bullshit.
+无 Flash、无 Java、无 Websocket，只专注于测速。
 
-This is a very lightweight speed test implemented in Javascript, using XMLHttpRequest and Web Workers.
+这是一个非常轻量级的HTML5速度测试工具，使用 XMLHttpRequest 和 Web Workers 实现。本项目在原版 LibreSpeed 的基础上进行了深度中文优化和功能定制。
 
-## Try it
+## 特性
 
-[Take a speed test](https://librespeed.org)
+*   下载速度测试
+*   上传速度测试
+*   Ping 和 抖动
+*   IP 地址、运营商、地理位置检测
+*   遥测（可选）
+*   结果分享（可选）
+*   多测试点部署（可选）
 
-## Compatibility
+![测速GIF演示](https://speedtest.fdossena.com/mpot_v6.gif)
 
-All modern browsers are supported: IE11, latest Edge, latest Chrome, latest Firefox, latest Safari.
-Works with mobile versions too.
+## Docker 部署 (推荐)
 
-## Features
+本项目已打包为 Docker 镜像，并托管在 Docker Hub 上，这是最推荐的部署方式。
 
-* Download
-* Upload
-* Ping
-* Jitter
-* IP Address, ISP, distance from server (optional)
-* Telemetry (optional)
-* Results sharing (optional)
-* Multiple Points of Test (optional)
+**镜像地址**: [v6ole/speedtest-chinese](https://hub.docker.com/r/v6ole/speedtest-chinese)
 
-![Screenrecording of a running Speedtest](https://speedtest.fdossena.com/mpot_v6.gif)
+### 快速启动
 
-## Server requirements
+```shell
+docker run -p 80:8080 -d --name speedtest --rm v6ole/speedtest-chinese:latest
+```
+然后在浏览器中访问服务器的80端口即可。
 
-* A reasonably fast web server with Apache 2 (nginx, IIS also supported)
-* PHP 5.4 or newer (other backends also available)
-* MariaDB or MySQL database to store test results (optional, Microsoft SQL Server, PostgreSQL and SQLite also supported)
-* A fast! internet connection
+### Docker Compose
 
-## Installation
+在生产环境中，推荐使用 `docker-compose`。
 
-Assuming you have PHP and a web server installed, the installation steps are quite simple.
+```yml
+version: '3.8'
+services:
+  speedtest:
+    container_name: speedtest
+    image: v6ole/speedtest-chinese:latest
+    restart: unless-stopped
+    ports:
+      - "80:8080"
+    environment:
+      MODE: standalone
+      TITLE: "SpeedTest"
+      # ... 更多环境变量请参考详细文档
+```
 
-1. Download the source code and extract it
-1. Copy the following files to your web server's shared folder (ie. /var/www/html/speedtest for Apache): index.html, speedtest.js, speedtest_worker.js, favicon.ico and the backend folder
-1. Optionally, copy the results folder too, and set up the database using the config file in it.
-1. Be sure your permissions allow execute (755).
-1. Visit YOURSITE/speedtest/index.html and voila!
+**👉 查看 [Docker 部署中文文档 (doc_docker.md)](doc_docker.md) 获取所有环境变量和高级配置的详细说明。**
 
-### Installation Video
+## 手动安装
 
-This video shows the installation process of a standalone LibreSpeed server: [Quick start installation guide for Debian 12](https://fdossena.com/?p=speedtest/quickstart_deb12.frag)
+如果您希望手动安装，服务器需要满足以下基本要求：
 
-More videos will be added later.
+*   Web 服务器（如 Apache, Nginx）
+*   PHP 5.4 或更高版本
 
-## Android app
+详细的手动安装指南和参数配置，请参考项目的 [详细中文文档 (doc.md)](doc.md)。
 
-A template to build an Android client for your LibreSpeed installation is available [here](https://github.com/librespeed/speedtest-android).
+## 致谢
 
-## CLI client
+本项目基于 [Federico Dossena](https://github.com/librespeed/speedtest) 的 LibreSpeed 项目。
 
-A command line client is available [here](https://github.com/librespeed/speedtest-cli).
-
-## Docker
-
-A docker image is available on [GitHub](https://github.com/librespeed/speedtest/pkgs/container/speedtest), check our [docker documentation](doc_docker.md) for more info about it.
-The image is built every week to include an updated version of the ipinfo-DB used for ISP detection. Also this ensures, that the latest security patches in PHP are installed. Therefore we recommend to use the `latest` image.
-
-## Go backend
-
-A Go implementation is available in the [`speedtest-go`](https://github.com/librespeed/speedtest-go) repo, maintained by [Maddie Zhan](https://github.com/maddie).
-
-## Rust backend
-
-A Rust implementation is available in the [`speedtest-rust`](https://github.com/librespeed/speedtest-rust) repo, maintained by [Sudo Dios](https://github.com/sudodios).
-
-## Node.js backend
-
-A partial Node.js implementation is available in the `node` branch, developed by [dunklesToast](https://github.com/dunklesToast). It's not recommended to use at the moment.
-
-## Donate
-
-[![Donate with Liberapay](https://liberapay.com/assets/widgets/donate.svg)](https://liberapay.com/fdossena/donate)
-[Donate with PayPal](https://www.paypal.me/sineisochronic)
-
-## License
+## 许可证
 
 Copyright (C) 2016-2024 Federico Dossena
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Lesser General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
+本程序是自由软件：您可以根据自由软件基金会发布的 GNU 宽通用公共许可证（版本3或您选择的任何更高版本）的条款，重新分发和/或修改它。
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/lgpl>.
+本程序的分发是希望它有用，但**没有任何保证**；甚至没有对**适销性**或**特定用途适用性**的默示保证。有关更多详细信息，请参阅 GNU 通用公共许可证。
