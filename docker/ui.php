@@ -1,527 +1,729 @@
-<!DOCTYPE html>
-<html>
-<head>
-<link rel="shortcut icon" href="favicon.ico">
-<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, user-scalable=no" />
-<meta charset="UTF-8" />
-<script type="text/javascript" src="speedtest.js"></script>
-<script type="text/javascript">
-function I(i){return document.getElementById(i);}
-
-//LIST OF TEST SERVERS. See documentation for details if needed
 <?php
-$mode=getenv("MODE");
-if($mode=="standalone" || $mode=="backend"){ ?>
-var SPEEDTEST_SERVERS=[];
-<?php } else { ?>
-var SPEEDTEST_SERVERS= <?= file_get_contents('/servers.json') ?: '[]' ?>;
-<?php } 
-if ($mode=="dual"){ ?>
-// add own server in dual mode
-SPEEDTEST_SERVERS.unshift({
-	"name":"This Server",
-	"server":document.location.href+"backend/",
-	"id":1,
-	"dlURL":"garbage.php",
-	"ulURL":"empty.php",
-	"pingURL":"empty.php",
-	"getIpURL":"getIP.php",
-	"pingT":-1
-})
-<?php } ?>
-//INITIALIZE SPEED TEST
-var s=new Speedtest(); //create speed test object
-<?php if(getenv("TELEMETRY")=="true"){ ?>
-s.setParameter("telemetry_level","basic");
-<?php } ?>
-<?php if(getenv("DISABLE_IPINFO")=="true"){ ?>
-s.setParameter("getIp_ispInfo",false);
-<?php } ?>
-<?php if(getenv("DISTANCE")){ ?>
-s.setParameter("getIp_ispInfo_distance","<?=getenv("DISTANCE") ?>");
-<?php } ?>
-
-//SERVER AUTO SELECTION
-function initServers(){
-	if(SPEEDTEST_SERVERS.length==0){ //standalone installation
-		//just make the UI visible
-		I("loading").className="hidden";
-		I("serverArea").style.display="none";
-		I("testWrapper").className="visible";
-		initUI();
-	}else{ //multiple servers
-		var noServersAvailable=function(){
-			I("message").innerHTML="No servers available";
-		}
-		var runServerSelect=function(){
-			s.selectServer(function(server){
-				if(server!=null){ //at least 1 server is available
-					I("loading").className="hidden"; //hide loading message
-					//populate server list for manual selection
-					for(var i=0;i<SPEEDTEST_SERVERS.length;i++){
-						if(SPEEDTEST_SERVERS[i].pingT==-1) continue;
-						var option=document.createElement("option");
-						option.value=i;
-						option.textContent=SPEEDTEST_SERVERS[i].name;
-						if(SPEEDTEST_SERVERS[i]===server) option.selected=true;
-						I("server").appendChild(option);
-					}
-					//show test UI
-					I("testWrapper").className="visible";
-					initUI();
-				}else{ //no servers are available, the test cannot proceed
-					noServersAvailable();
-				}
-			});
-		}
-		if(typeof SPEEDTEST_SERVERS === "string"){
-			//need to fetch list of servers from specified URL
-			s.loadServerList(SPEEDTEST_SERVERS,function(servers){
-				if(servers==null){ //failed to load server list
-					noServersAvailable();
-				}else{ //server list loaded
-					SPEEDTEST_SERVERS=servers;
-					runServerSelect();
-				}
-			});
-		}else{
-			//hardcoded server list
-			s.addTestPoints(SPEEDTEST_SERVERS);
-			runServerSelect();
-		}
-	}
+// 获取用户IP和基本信息
+function getUserIP() {
+    if (isset($_SERVER["HTTP_CF_CONNECTING_IP"])) {
+        $_SERVER['REMOTE_ADDR'] = $_SERVER["HTTP_CF_CONNECTING_IP"];
+        return $_SERVER['REMOTE_ADDR'];
+    }
+    if (isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        $ip_list = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+        return trim($ip_list[0]);
+    }
+    if (isset($_SERVER['HTTP_X_REAL_IP'])) {
+        return $_SERVER['HTTP_X_REAL_IP'];
+    }
+    if (isset($_SERVER['HTTP_CLIENT_IP'])) {
+        return $_SERVER['HTTP_CLIENT_IP'];
+    }
+    return $_SERVER['REMOTE_ADDR'];
 }
 
-var meterBk=/Trident.*rv:(\d+\.\d+)/i.test(navigator.userAgent)?"#EAEAEA":"#80808040";
-var dlColor="#6060AA",
-	ulColor="#616161";
-var progColor=meterBk;
+function translateIsp($isp_en) {
+    $translations = [
+        'China Telecom' => '中国电信',
+        'Chinanet' => '中国电信',
+        'China Unicom' => '中国联通',
+        'China Mobile' => '中国移动',
+        'Dr. Peng' => '鹏博士',
+        'Tietong' => '中国铁通',
+        'Alibaba' => '阿里云',
+        'Tencent' => '腾讯云',
+        'Baidu' => '百度云',
+        'China Education and Research Network' => '教育网'
+    ];
 
-//CODE FOR GAUGES
-function drawMeter(c,amount,bk,fg,progress,prog){
-	var ctx=c.getContext("2d");
-	var dp=window.devicePixelRatio||1;
-	var cw=c.clientWidth*dp, ch=c.clientHeight*dp;
-	var sizScale=ch*0.0055;
-	if(c.width==cw&&c.height==ch){
-		ctx.clearRect(0,0,cw,ch);
-	}else{
-		c.width=cw;
-		c.height=ch;
-	}
-	ctx.beginPath();
-	ctx.strokeStyle=bk;
-	ctx.lineWidth=12*sizScale;
-	ctx.arc(c.width/2,c.height-58*sizScale,c.height/1.8-ctx.lineWidth,-Math.PI*1.1,Math.PI*0.1);
-	ctx.stroke();
-	ctx.beginPath();
-	ctx.strokeStyle=fg;
-	ctx.lineWidth=12*sizScale;
-	ctx.arc(c.width/2,c.height-58*sizScale,c.height/1.8-ctx.lineWidth,-Math.PI*1.1,amount*Math.PI*1.2-Math.PI*1.1);
-	ctx.stroke();
-	if(typeof progress !== "undefined"){
-		ctx.fillStyle=prog;
-		ctx.fillRect(c.width*0.3,c.height-16*sizScale,c.width*0.4*progress,4*sizScale);
-	}
-}
-function mbpsToAmount(s){
-	return 1-(1/(Math.pow(1.3,Math.sqrt(s))));
-}
-function format(d){
-    d=Number(d);
-    if(d<10) return d.toFixed(2);
-    if(d<100) return d.toFixed(1);
-    return d.toFixed(0);
+    foreach ($translations as $en => $cn) {
+        if (stripos($isp_en, $en) !== false) {
+            return $cn;
+        }
+    }
+    return $isp_en; // 如果没有匹配，返回原始名称
 }
 
-//UI CODE
-var uiData=null;
-function startStop(){
-    if(s.getState()==3){
-		//speed test is running, abort
-		s.abort();
-		data=null;
-		I("startStopBtn").className="";
-		I("server").disabled=false;
-		initUI();
-	}else{
-		//test is not running, begin
-		I("startStopBtn").className="running";
-		I("shareArea").style.display="none";
-		I("server").disabled=true;
-		s.onupdate=function(data){
-            uiData=data;
-		};
-		s.onend=function(aborted){
-            I("startStopBtn").className="";
-            I("server").disabled=false;
-            updateUI(true);
-            if(!aborted){
-                //if testId is present, show sharing panel, otherwise do nothing
-                try{
-                    var testId=uiData.testId;
-                    if(testId!=null){
-                        var shareURL=window.location.href.substring(0,window.location.href.lastIndexOf("/"))+"/results/?id="+testId;
-                        I("resultsImg").src=shareURL;
-                        I("resultsURL").value=shareURL;
-                        I("testId").innerHTML=testId;
-                        I("shareArea").style.display="";
-                    }
-                }catch(e){}
+function getIpInfo($ip) {
+    try {
+        // 使用 ip-api.com 查询, 并请求中文结果
+        $url = "http://ip-api.com/json/{$ip}?lang=zh-CN&fields=status,message,country,city,isp";
+        $response = @file_get_contents($url);
+        if ($response === false) {
+            return ['未知', '未知'];
+        }
+
+        $data = json_decode($response, true);
+        if ($data && $data['status'] == 'success') {
+            $location = ($data['city'] ? $data['city'] . ', ' : '') . $data['country'];
+            $isp = translateIsp($data['isp']);
+            return [$location, $isp];
+        }
+        return ['未知', '未知'];
+    } catch (Exception $e) {
+        return ['未知', '未知'];
+    }
+}
+
+$userIP = getUserIP();
+// Handle local/private IPs for development
+$isPrivateIp = filter_var(
+    $userIP,
+    FILTER_VALIDATE_IP,
+    FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
+) === false;
+
+if ($userIP === '127.0.0.1' || $isPrivateIp) {
+    $userLocation = "本地, 中国";
+    $userISP = "本地网络";
+} else {
+    list($userLocation, $userISP) = getIpInfo($userIP);
+}
+?>
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?= getenv('TITLE') ?: 'SpeedTest - 网络速度测试' ?></title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            min-height: 100vh;
+            color: #1e293b;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 1rem;
+        }
+
+        /* Main Content */
+        .main {
+            padding: 2rem 0;
+        }
+
+        .hero {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .hero h1 {
+            font-size: 3rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, #1e293b 0%, #475569 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero p {
+            font-size: 1.125rem;
+            color: #64748b;
+            max-width: 32rem;
+            margin: 0 auto;
+        }
+
+        /* Speed Test Card */
+        .speed-card {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(10px);
+            border-radius: 1rem;
+            padding: 2rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.1);
+            margin-bottom: 2rem;
+        }
+
+        .test-initial {
+            text-align: center;
+        }
+
+        .test-icon {
+            width: 8rem;
+            height: 8rem;
+            margin: 0 auto 1.5rem;
+            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+
+        .test-icon.pulse {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .start-btn {
+            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            color: white;
+            border: none;
+            padding: 0.75rem 2rem;
+            border-radius: 0.5rem;
+            font-size: 1.125rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .start-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(59, 130, 246, 0.3);
+        }
+
+        .start-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Progress */
+        .progress-container {
+            margin: 1.5rem 0;
+        }
+
+        .progress-text {
+            font-size: 1.125rem;
+            font-weight: 500;
+            margin-bottom: 1rem;
+            color: #475569;
+        }
+
+        .progress-bar {
+            width: 100%;
+            max-width: 24rem;
+            margin: 0 auto;
+            height: 0.75rem;
+            background: rgba(59, 130, 246, 0.2);
+            border-radius: 9999px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%);
+            border-radius: 9999px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+
+        .progress-percent {
+            font-size: 0.875rem;
+            color: #64748b;
+            margin-top: 0.5rem;
+        }
+
+        /* Results */
+        .results {
+            display: none;
+        }
+
+        .results.show {
+            display: block;
+        }
+
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .result-item {
+            text-align: center;
+        }
+
+        .result-icon {
+            width: 2rem;
+            height: 2rem;
+            margin: 0 auto 0.5rem;
+        }
+
+        .result-label {
+            font-size: 0.875rem;
+            color: #64748b;
+            margin-bottom: 0.5rem;
+        }
+
+        .result-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 0.25rem;
+        }
+
+        .result-unit {
+            font-size: 0.875rem;
+            color: #64748b;
+            margin-bottom: 0.5rem;
+        }
+
+        .result-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: white;
+        }
+
+        .badge-excellent { background: #10b981; }
+        .badge-good { background: #3b82f6; }
+        .badge-average { background: #f59e0b; }
+        .badge-poor { background: #ef4444; }
+
+        .action-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: #475569;
+            border: 1px solid #e2e8f0;
+            padding: 0.5rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-secondary:hover {
+            background: #f8fafc;
+            border-color: #cbd5e1;
+        }
+
+        /* Info Cards */
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .info-card {
+            background: rgba(255, 255, 255, 0.6);
+            backdrop-filter: blur(10px);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+        }
+
+        .info-title {
+            font-weight: 600;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.75rem;
+            font-size: 0.875rem;
+        }
+
+        .info-label {
+            color: #64748b;
+        }
+
+        .info-value {
+            font-weight: 500;
+        }
+
+        /* Footer */
+        .footer {
+            padding: 1rem 0;
+            margin-top: 2rem;
+            text-align: center;
+            color: #64748b;
+        }
+
+        /* Credits Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-overlay.show {
+            display: flex;
+        }
+        .modal-content {
+            background: white;
+            padding: 2rem;
+            border-radius: 1rem;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            position: relative;
+        }
+        .modal-close {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            cursor: pointer;
+            font-size: 1.5rem;
+            color: #9ca3af;
+        }
+        .modal-close:hover {
+            color: #1e293b;
+        }
+        .modal-title {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+        }
+        .credits-list {
+            list-style: none;
+            padding: 0;
+            margin-top: 1rem;
+        }
+        .credits-list li {
+            margin-bottom: 0.75rem;
+        }
+        .credits-list strong {
+            display: inline-block;
+            width: 150px;
+            color: #3b82f6;
+        }
+        .credits-footer {
+            margin-top: 1.5rem;
+            text-align: center;
+            font-style: italic;
+            color: #64748b;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 2rem;
             }
-		};
-		s.start();
-	}
-}
-//this function reads the data sent back by the test and updates the UI
-function updateUI(forced){
-	if(!forced&&s.getState()!=3) return;
-	if(uiData==null) return;
-	var status=uiData.testState;
-	I("ip").textContent=uiData.clientIp;
-	I("dlText").textContent=(status==1&&uiData.dlStatus==0)?"...":format(uiData.dlStatus);
-	drawMeter(I("dlMeter"),mbpsToAmount(Number(uiData.dlStatus*(status==1?oscillate():1))),meterBk,dlColor,Number(uiData.dlProgress),progColor);
-	I("ulText").textContent=(status==3&&uiData.ulStatus==0)?"...":format(uiData.ulStatus);
-	drawMeter(I("ulMeter"),mbpsToAmount(Number(uiData.ulStatus*(status==3?oscillate():1))),meterBk,ulColor,Number(uiData.ulProgress),progColor);
-	I("pingText").textContent=format(uiData.pingStatus);
-	I("jitText").textContent=format(uiData.jitterStatus);
-}
-function oscillate(){
-	return 1+0.02*Math.sin(Date.now()/100);
-}
-//update the UI every frame
-window.requestAnimationFrame=window.requestAnimationFrame||window.webkitRequestAnimationFrame||window.mozRequestAnimationFrame||window.msRequestAnimationFrame||(function(callback,element){setTimeout(callback,1000/60);});
-function frame(){
-	requestAnimationFrame(frame);
-	updateUI();
-}
-frame(); //start frame loop
-//function to (re)initialize UI
-function initUI(){
-	drawMeter(I("dlMeter"),0,meterBk,dlColor,0);
-	drawMeter(I("ulMeter"),0,meterBk,ulColor,0);
-	I("dlText").textContent="";
-	I("ulText").textContent="";
-	I("pingText").textContent="";
-	I("jitText").textContent="";
-	I("ip").textContent="";
-}
-</script>
-<style type="text/css">
-	html,body{
-		border:none; padding:0; margin:0;
-		background:#FFFFFF;
-		color:#202020;
-	}
-	body{
-		text-align:center;
-		font-family:"Roboto",sans-serif;
-	}
-	h1{
-		color:#404040;
-	}
-	#loading{
-		background-color:#FFFFFF;
-		color:#404040;
-		text-align:center;
-	}
-	span.loadCircle{
-		display:inline-block;
-		width:2em;
-		height:2em;
-		vertical-align:middle;
-		background:url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAMAAAD04JH5AAAAP1BMVEUAAAB2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZyFzwnAAAAFHRSTlMAEvRFvX406baecwbf0casimhSHyiwmqgAAADpSURBVHja7dbJbQMxAENRahnN5lkc//5rDRAkDeRgHszXgACJoKiIiIiIiIiIiIiIiIiIiIj4HHspsrpAVhdVVguzrA4OWc10WcEqpwKbnBo0OU1Q5NSpsoJFTgOecrrdEag85DRgktNqfoEdTjnd7hrEHMEJvmRUYJbTYk5Agy6nau6Abp5Cm7mDBtRdPi9gyKdU7w4p1fsLvyqs8hl4z9/w3n/Hmr9WoQ65lAU4d7lMYOz//QboRR5jBZibLMZdAR6O/Vfa1PlxNr3XdS3HzK/HVPRu/KnLs8iAOh993VpRRERERMT/fAN60wwWaVyWwAAAAABJRU5ErkJggg==');
-		background-size:2em 2em;
-		margin-right:0.5em;
-		animation: spin 0.6s linear infinite;
-	}
-	@keyframes spin{
-		0%{transform:rotate(0deg);}
-		100%{transform:rotate(359deg);}
-	}
-	#startStopBtn{
-		display:inline-block;
-		margin:0 auto;
-		color:#6060AA;
-		background-color:rgba(0,0,0,0);
-		border:0.15em solid #6060FF;
-		border-radius:0.3em;
-		transition:all 0.3s;
-		box-sizing:border-box;
-		width:8em; height:3em;
-		line-height:2.7em;
-		cursor:pointer;
-		box-shadow: 0 0 0 rgba(0,0,0,0.1), inset 0 0 0 rgba(0,0,0,0.1);
-	}
-	#startStopBtn:hover{
-		box-shadow: 0 0 2em rgba(0,0,0,0.1), inset 0 0 1em rgba(0,0,0,0.1);
-	}
-	#startStopBtn.running{
-		background-color:#FF3030;
-		border-color:#FF6060;
-		color:#FFFFFF;
-	}
-	#startStopBtn:before{
-		content:"Start";
-	}
-	#startStopBtn.running:before{
-		content:"Abort";
-	}
-	#serverArea{
-		margin-top:1em;
-	}
-	#server{
-		font-size:1em;
-		padding:0.2em;
-	}
-	#test{
-		margin-top:2em;
-		margin-bottom:12em;
-	}
-	div.testArea{
-		display:inline-block;
-		width:16em;
-		height:12.5em;
-		position:relative;
-		box-sizing:border-box;
-	}
-	div.testArea2{
-		display:inline-block;
-		width:14em;
-		height:7em;
-		position:relative;
-		box-sizing:border-box;
-		text-align:center;
-	}
-	div.testArea div.testName{
-		position:absolute;
-		top:0.1em; left:0;
-		width:100%;
-		font-size:1.4em;
-		z-index:9;
-	}
-	div.testArea2 div.testName{
-        display:block;
-        text-align:center;
-        font-size:1.4em;
-	}
-	div.testArea div.meterText{
-		position:absolute;
-		bottom:1.55em; left:0;
-		width:100%;
-		font-size:2.5em;
-		z-index:9;
-	}
-	div.testArea2 div.meterText{
-        display:inline-block;
-        font-size:2.5em;
-	}
-	div.meterText:empty:before{
-		content:"0.00";
-	}
-	div.testArea div.unit{
-		position:absolute;
-		bottom:2em; left:0;
-		width:100%;
-		z-index:9;
-	}
-	div.testArea2 div.unit{
-		display:inline-block;
-	}
-	div.testArea canvas{
-		position:absolute;
-		top:0; left:0; width:100%; height:100%;
-		z-index:1;
-	}
-	div.testGroup{
-		display:block;
-        margin: 0 auto;
-	}
-	#shareArea{
-		width:95%;
-		max-width:40em;
-		margin:0 auto;
-		margin-top:2em;
-	}
-	#shareArea > *{
-		display:block;
-		width:100%;
-		height:auto;
-		margin: 0.25em 0;
-	}
-	#privacyPolicy{
-        position:fixed;
-        top:2em;
-        bottom:2em;
-        left:2em;
-        right:2em;
-        overflow-y:auto;
-        width:auto;
-        height:auto;
-        box-shadow:0 0 3em 1em #000000;
-        z-index:999999;
-        text-align:left;
-        background-color:#FFFFFF;
-        padding:1em;
-	}
-	a.privacy{
-        text-align:center;
-        font-size:0.8em;
-        color:#808080;
-        padding: 0 3em;
-	}
-    div.closePrivacyPolicy {
-        width: 100%;
-        text-align: center;
-    }
-    div.closePrivacyPolicy a.privacy {
-        padding: 1em 3em;
-    }
-	@media all and (max-width:40em){
-		body{
-			font-size:0.8em;
-		}
-	}
-	div.visible{
-		animation: fadeIn 0.4s;
-		display:block;
-	}
-	div.hidden{
-		animation: fadeOut 0.4s;
-		display:none;
-	}
-	@keyframes fadeIn{
-		0%{
-			opacity:0;
-		}
-		100%{
-			opacity:1;
-		}
-	}
-	@keyframes fadeOut{
-		0%{
-			display:block;
-			opacity:1;
-		}
-		100%{
-			display:block;
-			opacity:0;
-		}
-	}
-	@media all and (prefers-color-scheme: dark){
-		html,body,#loading{
-			background:#202020;
-			color:#F4F4F4;
-			color-scheme:dark;
-		}
-		h1{
-			color:#E0E0E0;
-		}
-		a{
-			color:#9090FF;
-		}
-		#privacyPolicy{
-			background:#000000;
-		}
-		#resultsImg{
-			filter: invert(1);
-		}
-	}
-</style>
-<title><?= getenv('TITLE') ?: 'LibreSpeed' ?></title>
+            .hero p {
+                font-size: 1rem;
+            }
+
+            .results-grid {
+                grid-template-columns: repeat(3, 1fr);
+                gap: 0.5rem;
+                align-items: start;
+            }
+
+            .result-value {
+                font-size: 1.5rem;
+            }
+            .result-label, .result-unit {
+                font-size: 0.75rem;
+            }
+
+            .action-buttons {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .speed-card, .info-card {
+                padding: 1rem;
+            }
+
+            .test-icon {
+                width: 6rem;
+                height: 6rem;
+            }
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
 </head>
-<body onload="initServers()">
-<h1><?= getenv('TITLE') ?: 'LibreSpeed' ?></h1>
-<div id="loading" class="visible">
-	<p id="message"><span class="loadCircle"></span>Selecting a server...</p>
-</div>
-<div id="testWrapper" class="hidden">
-	<div id="startStopBtn" onclick="startStop()"></div><br/>
-	<?php if(getenv("TELEMETRY")=="true"){ ?>
-		<a class="privacy" href="#" onclick="I('privacyPolicy').style.display=''">Privacy</a>
-	<?php } ?>
-	<div id="serverArea">
-		Server: <select id="server" onchange="s.setSelectedServer(SPEEDTEST_SERVERS[this.value])"></select>
-	</div>
-	<div id="test">
-		<div class="testGroup">
-            <div class="testArea2">
-				<div class="testName">Ping</div>
-				<div id="pingText" class="meterText" style="color:#AA6060"></div>
-				<div class="unit">ms</div>
-			</div>
-			<div class="testArea2">
-				<div class="testName">Jitter</div>
-				<div id="jitText" class="meterText" style="color:#AA6060"></div>
-				<div class="unit">ms</div>
-			</div>
-		</div>
-		<div class="testGroup">
-			<div class="testArea">
-				<div class="testName">Download</div>
-				<canvas id="dlMeter" class="meter"></canvas>
-				<div id="dlText" class="meterText"></div>
-				<div class="unit">Mbit/s</div>
-			</div>
-			<div class="testArea">
-				<div class="testName">Upload</div>
-				<canvas id="ulMeter" class="meter"></canvas>
-				<div id="ulText" class="meterText"></div>
-				<div class="unit">Mbit/s</div>
-			</div>
-		</div>
-		<div id="ipArea">
-			<span id="ip"></span>
-		</div>
-		<div id="shareArea" style="display:none">
-			<h3>Share results</h3>
-			<p>Test ID: <span id="testId"></span></p>
-			<input type="text" value="" id="resultsURL" readonly="readonly" onclick="this.select();this.focus();this.select();document.execCommand('copy');alert('Link copied')"/>
-			<img src="" id="resultsImg" />
-		</div>
-	</div>
-	<a href="https://github.com/librespeed/speedtest">Source code</a>
-</div>
-<div id="privacyPolicy" style="display:none">
-    <h2>Privacy Policy</h2>
-    <p>This HTML5 speed test server is configured with telemetry enabled.</p>
-    <h4>What data we collect</h4>
-    <p>
-        At the end of the test, the following data is collected and stored:
-        <ul>
-            <li>Test ID</li>
-            <li>Time of testing</li>
-            <li>Test results (download and upload speed, ping and jitter)</li>
-            <li>IP address</li>
-            <li>ISP information</li>
-            <li>Approximate location (inferred from IP address, not GPS)</li>
-            <li>User agent and browser locale</li>
-            <li>Test log (contains no personal information)</li>
-        </ul>
-    </p>
-    <h4>How we use the data</h4>
-    <p>
-        Data collected through this service is used to:
-        <ul>
-            <li>Allow sharing of test results (sharable image for forums, etc.)</li>
-            <li>To improve the service offered to you (for instance, to detect problems on our side)</li>
-        </ul>
-        No personal information is disclosed to third parties.
-    </p>
-    <h4>Your consent</h4>
-    <p>
-        By starting the test, you consent to the terms of this privacy policy.
-    </p>
-    <h4>Data removal</h4>
-    <p>
-        If you want to have your information deleted, you need to provide either the ID of the test or your IP address. This is the only way to identify your data, without this information we won't be able to comply with your request.<br/><br/>
-        Contact this email address for all deletion requests: <a href="mailto:<?=getenv("EMAIL") ?>"><?=getenv("EMAIL") ?></a>.
-    </p>
-    <br/><br/>
-    <div class="closePrivacyPolicy">
-        <a class="privacy" href="#" onclick="I('privacyPolicy').style.display='none'">Close</a>
+<body>
+    <!-- Main Content -->
+    <main class="main">
+        <div class="container">
+            <!-- Hero Section -->
+            <div class="hero">
+                <h1><?= getenv('TITLE') ?: '网络速度测试' ?></h1>
+                <p><?= getenv('SUBTITLE') ?: '测试您的网络连接速度，获取准确的下载、上传速度和延迟数据' ?></p>
+            </div>
+
+            <!-- Speed Test Card -->
+            <div class="speed-card">
+                <!-- Initial State -->
+                <div id="initial-state" class="test-initial">
+                    <div class="test-icon" id="test-icon">
+                        <svg width="64" height="64" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
+                           <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+                           <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+                           <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+                           <line x1="12" y1="20" x2="12.01" y2="20"></line>
+                        </svg>
+                    </div>
+                    <button class="start-btn" onclick="startSpeedTest()">开始测速</button>
+                </div>
+
+                <!-- Testing State -->
+                <div id="testing-state" class="test-initial hidden">
+                    <div class="test-icon pulse">
+                        <svg width="64" height="64" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
+                           <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+                           <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+                           <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+                           <line x1="12" y1="20" x2="12.01" y2="20"></line>
+                        </svg>
+                    </div>
+                    <div class="progress-container">
+                        <p class="progress-text" id="progress-text">正在测试延迟...</p>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progress-fill"></div>
+                        </div>
+                        <p class="progress-percent" id="progress-percent">0%</p>
+                    </div>
+                </div>
+
+                <!-- Results State -->
+                <div id="results-state" class="results">
+                    <div class="results-grid">
+                        <div class="result-item">
+                            <svg class="result-icon" style="color: #10b981;" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                            </svg>
+                            <p class="result-label">下载速度</p>
+                            <p class="result-value" id="download-speed">0</p>
+                            <p class="result-unit">Mbps</p>
+                            <span class="result-badge" id="download-badge">测试中</span>
+                        </div>
+
+                        <div class="result-item">
+                            <svg class="result-icon" style="color: #3b82f6;" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                            </svg>
+                            <p class="result-label">上传速度</p>
+                            <p class="result-value" id="upload-speed">0</p>
+                            <p class="result-unit">Mbps</p>
+                            <span class="result-badge" id="upload-badge">测试中</span>
+                        </div>
+
+                        <div class="result-item">
+                            <svg class="result-icon" style="color: #f59e0b;" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                            </svg>
+                            <p class="result-label">延迟</p>
+                            <p class="result-value" id="ping-value">0</p>
+                            <p class="result-unit">ms</p>
+                            <span class="result-badge badge-good" id="jitter-info">抖动: 0ms</span>
+                        </div>
+                    </div>
+
+                    <div class="action-buttons">
+                        <button class="start-btn" onclick="startSpeedTest()">重新测试</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Info Cards -->
+            <div class="info-grid">
+                <div class="info-card">
+                    <h3 class="info-title">
+                        <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M20 3H4c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h3l-1 1v2h12v-2l-1-1h3c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM4 14V5h16v9H4z"/>
+                        </svg>
+                        连接信息
+                    </h3>
+                    <div class="info-item">
+                        <span class="info-label">IP 地址:</span>
+                        <span class="info-value"><?php echo $userIP; ?></span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">位置:</span>
+                        <span class="info-value"><?php echo $userLocation; ?></span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">运营商:</span>
+                        <span class="info-value"><?php echo $userISP; ?></span>
+                    </div>
+                </div>
+
+                <div class="info-card">
+                    <h3 class="info-title">
+                        <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/>
+                        </svg>
+                        速度建议
+                    </h3>
+                    <div class="info-item">
+                        <span class="info-label">网页浏览:</span>
+                        <span class="info-value">1~5 Mbps</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">视频通话:</span>
+                        <span class="info-value">1~4 Mbps</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">4K 视频:</span>
+                        <span class="info-value">25+ Mbps</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                <?= getenv('COPYRIGHT') ?: '&copy; 2024 SpeedTest. 专业的网络速度测试工具' ?>
+                <span style="margin: 0 0.5rem;">|</span>
+                <a href="#" id="show-credits" style="color: inherit; text-decoration: none;">鸣谢</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Credits Modal -->
+    <div id="credits-modal-overlay" class="modal-overlay">
+        <div class="modal-content">
+            <span id="close-credits" class="modal-close">&times;</span>
+            <h2 class="modal-title">鸣谢</h2>
+            <p>本项目得以实现，离不开以下优秀的开源项目与服务：</p>
+            <ul class="credits-list">
+                <li><strong>核心测速引擎:</strong> <a href="https://github.com/librespeed/speedtest" target="_blank">LibreSpeed</a></li>
+                <li><strong>IP地理位置接口:</strong> <a href="https://ip-api.com/" target="_blank">ip-api.com</a></li>
+                <li><strong>图标库:</strong> <a href="https://heroicons.com/" target="_blank">Heroicons</a></li>
+            </ul>
+            <p class="credits-footer">v6ole：站在巨人的肩膀上。</p>
+        </div>
     </div>
-    <br/>
-</div>
+
+    <script type="text/javascript" src="/speedtest.js"></script>
+    <script>
+        let isTestRunning = false;
+        let s = new Speedtest();
+        let testData = {};
+
+        function startSpeedTest() {
+            if (isTestRunning) {
+                s.abort();
+                return;
+            }
+            
+            isTestRunning = true;
+            s.setParameter("test_order", "I_P_D_U");
+            
+            document.getElementById('initial-state').classList.add('hidden');
+            document.getElementById('testing-state').classList.remove('hidden');
+            document.getElementById('results-state').classList.remove('show');
+            document.getElementById('progress-text').textContent = '正在初始化...';
+            updateProgress(0);
+            
+            s.onupdate = function(data) {
+                if (!isTestRunning) return;
+                testData = data;
+                let status = data.testState;
+                if (status === 1) { // Download test
+                    document.getElementById('progress-text').textContent = '正在测试下载速度...';
+                    updateProgress(Math.round(data.dlProgress * 100));
+                    document.getElementById('download-speed').textContent = data.dlStatus;
+                }
+                if (status === 2) { // Ping test
+                    document.getElementById('progress-text').textContent = '正在测试延迟...';
+                    updateProgress(Math.round(data.pingProgress * 100));
+                    document.getElementById('ping-value').textContent = data.pingStatus;
+                    document.getElementById('jitter-info').textContent = `抖动: ${data.jitterStatus}ms`;
+                }
+                if (status === 3) { // Upload test
+                    document.getElementById('progress-text').textContent = '正在测试上传速度...';
+                    updateProgress(Math.round(data.ulProgress * 100));
+                    document.getElementById('upload-speed').textContent = data.ulStatus;
+                }
+            };
+            
+            s.onend = function(aborted) {
+                isTestRunning = false;
+                if (aborted) {
+                    console.log("测试已中止");
+                    document.getElementById('testing-state').classList.add('hidden');
+                    document.getElementById('initial-state').classList.remove('hidden');
+                    return;
+                }
+                showResults(testData);
+            };
+
+            s.start();
+        }
+
+        function updateProgress(progress) {
+            document.getElementById('progress-fill').style.width = progress + '%';
+            document.getElementById('progress-percent').textContent = progress + '%';
+        }
+
+        function showResults(results) {
+            const downloadSpeed = parseFloat(results.dlStatus) || 0;
+            const uploadSpeed = parseFloat(results.ulStatus) || 0;
+            const pingValue = parseFloat(results.pingStatus) || 0;
+            const jitterValue = parseFloat(results.jitterStatus) || 0;
+
+            // Update result values
+            document.getElementById('download-speed').textContent = downloadSpeed.toFixed(2);
+            document.getElementById('upload-speed').textContent = uploadSpeed.toFixed(2);
+            document.getElementById('ping-value').textContent = pingValue.toFixed(2);
+            document.getElementById('jitter-info').textContent = `抖动: ${jitterValue.toFixed(2)}ms`;
+            
+            // Update badges
+            const downloadBadge = getSpeedLevel(downloadSpeed);
+            document.getElementById('download-badge').textContent = downloadBadge.level;
+            document.getElementById('download-badge').className = 'result-badge ' + downloadBadge.class;
+            
+            const uploadBadge = getSpeedLevel(uploadSpeed);
+            document.getElementById('upload-badge').textContent = uploadBadge.level;
+            document.getElementById('upload-badge').className = 'result-badge ' + uploadBadge.class;
+            
+            // Hide testing state, show results
+            document.getElementById('testing-state').classList.add('hidden');
+            document.getElementById('results-state').classList.add('show');
+        }
+
+        function getSpeedLevel(speed) {
+            if (speed >= 50) return { level: '优秀', class: 'badge-excellent' };
+            if (speed >= 25) return { level: '良好', class: 'badge-good' };
+            if (speed >= 10) return { level: '一般', class: 'badge-average' };
+            return { level: '较慢', class: 'badge-poor' };
+        }
+
+        // Credits Modal Logic
+        const showCreditsBtn = document.getElementById('show-credits');
+        const closeCreditsBtn = document.getElementById('close-credits');
+        const creditsModalOverlay = document.getElementById('credits-modal-overlay');
+
+        showCreditsBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            creditsModalOverlay.classList.add('show');
+        });
+
+        closeCreditsBtn.addEventListener('click', function() {
+            creditsModalOverlay.classList.remove('show');
+        });
+
+        creditsModalOverlay.addEventListener('click', function(e) {
+            if (e.target === creditsModalOverlay) {
+                creditsModalOverlay.classList.remove('show');
+            }
+        });
+    </script>
 </body>
 </html>
