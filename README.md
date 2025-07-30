@@ -1,6 +1,6 @@
 ![LibreSpeed Logo](https://github.com/librespeed/speedtest/blob/master/.logo/logo3.png?raw=true)
 
-# LibreSpeed 中文优化版
+# LibreSpeed 中文UI优化版
 
 无 Flash、无 Java、无 Websocket，只专注于测速。
 
@@ -44,8 +44,11 @@ services:
     ports:
       - "80:8080"
     environment:
-      MODE: standalone
-      TITLE: "SpeedTest"
+      - MODE=standalone
+      - TITLE=站点标题
+      - SUBTITLE=副标题
+      - COPYRIGHT=页脚信息
+
       # ... 更多环境变量请参考详细文档
 ```
 
