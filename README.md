@@ -15,8 +15,7 @@
 *   遥测（可选）
 *   结果分享（可选）
 *   多测试点部署（可选）
-
-![测速GIF演示](https://speedtest.fdossena.com/mpot_v6.gif)
+![测速GIF演示](https://s2.loli.net/2025/07/30/c7D3mtQkj9auPyV.gif)
 
 ## Docker 部署 (推荐)
 
