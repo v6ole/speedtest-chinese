@@ -1,79 +1,304 @@
 <?php
-// 获取用户IP和基本信息
+// 优化的用户IP获取函数
 function getUserIP() {
-    if (isset($_SERVER["HTTP_CF_CONNECTING_IP"])) {
-        $_SERVER['REMOTE_ADDR'] = $_SERVER["HTTP_CF_CONNECTING_IP"];
-        return $_SERVER['REMOTE_ADDR'];
-    }
-    if (isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-        $ip_list = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
-        return trim($ip_list[0]);
-    }
-    if (isset($_SERVER['HTTP_X_REAL_IP'])) {
-        return $_SERVER['HTTP_X_REAL_IP'];
-    }
-    if (isset($_SERVER['HTTP_CLIENT_IP'])) {
-        return $_SERVER['HTTP_CLIENT_IP'];
-    }
-    return $_SERVER['REMOTE_ADDR'];
-}
-
-function translateIsp($isp_en) {
-    $translations = [
-        'China Telecom' => '中国电信',
-        'Chinanet' => '中国电信',
-        'China Unicom' => '中国联通',
-        'China Mobile' => '中国移动',
-        'Dr. Peng' => '鹏博士',
-        'Tietong' => '中国铁通',
-        'Alibaba' => '阿里云',
-        'Tencent' => '腾讯云',
-        'Baidu' => '百度云',
-        'China Education and Research Network' => '教育网'
+    $ipHeaders = [
+        'HTTP_CF_CONNECTING_IP', // Cloudflare
+        'HTTP_X_REAL_IP',        // Nginx
+        'HTTP_X_FORWARDED_FOR',  // 代理服务器
+        'HTTP_X_FORWARDED',      // 代理服务器
+        'HTTP_X_CLUSTER_CLIENT_IP', // 集群负载均衡器
+        'HTTP_CLIENT_IP',        // 代理服务器
+        'HTTP_FORWARDED_FOR',    // 代理服务器
+        'HTTP_FORWARDED'         // 代理服务器
     ];
-
-    foreach ($translations as $en => $cn) {
-        if (stripos($isp_en, $en) !== false) {
-            return $cn;
+    
+    foreach ($ipHeaders as $header) {
+        if (!empty($_SERVER[$header])) {
+            $ips = $_SERVER[$header];
+            
+            // 处理多个IP地址（逗号分隔）
+            if (strpos($ips, ',') !== false) {
+                $ipList = array_map('trim', explode(',', $ips));
+                // 获取第一个非私有IP
+                foreach ($ipList as $ip) {
+                    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+                        return $ip;
+                    }
+                }
+                // 如果没有公网IP，返回第一个
+                return $ipList[0];
+            } else {
+                // 单个IP地址
+                $ip = trim($ips);
+                if (filter_var($ip, FILTER_VALIDATE_IP)) {
+                    return $ip;
+                }
+            }
         }
     }
-    return $isp_en; // 如果没有匹配，返回原始名称
+    
+    // 如果没有找到其他IP，使用REMOTE_ADDR
+    return $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
 }
 
 function getIpInfo($ip) {
-    try {
-        // 使用 ip-api.com 查询, 并请求中文结果
-        $url = "http://ip-api.com/json/{$ip}?lang=zh-CN&fields=status,message,country,city,isp";
-        $response = @file_get_contents($url);
-        if ($response === false) {
-            return ['未知', '未知'];
+    // 增加更多的运营商翻译规则
+    $ispTranslations = [
+        'China Telecom' => '中国电信',
+        'Chinanet' => '中国电信',
+        'China Telecom Corporation Limited' => '中国电信',
+        'China Unicom' => '中国联通',
+        'CHINA UNICOM' => '中国联通',
+        'China Unicom Beijing Province Network' => '中国联通',
+        'China Mobile' => '中国移动',
+        'China Mobile Communications' => '中国移动',
+        'China Mobile Communications Group Co.,Ltd' => '中国移动',
+        'CMCC' => '中国移动',
+        'Dr. Peng' => '鹏博士',
+        'Dr.Peng Group' => '鹏博士',
+        'Tietong' => '中国铁通',
+        'China Tietong' => '中国铁通',
+        'Alibaba' => '阿里云',
+        'Alibaba Cloud' => '阿里云',
+        'Aliyun' => '阿里云',
+        'Tencent' => '腾讯云',
+        'Tencent Cloud' => '腾讯云',
+        'Baidu' => '百度云',
+        'China Education and Research Network' => '教育网',
+        'CERNET' => '教育网',
+        'CSTNET' => '中科院网络中心',
+        'China Science and Technology Network' => '中科院网络中心',
+        'Great Wall Broadband' => '长城宽带',
+        'Beijing Gehua CATV Network' => '歌华有线'
+    ];
+    
+    // 使用cURL替代file_get_contents，提供更好的控制
+    $apiSources = [
+        [
+            'url' => "http://ip-api.com/json/{$ip}?lang=zh-CN&fields=status,message,country,regionName,city,isp,as,query",
+            'parser' => 'parseIpApi',
+            'timeout' => 3
+        ]
+    ];
+    
+    foreach ($apiSources as $source) {
+        $result = makeApiRequest($source['url'], $source['timeout']);
+        if ($result !== false) {
+            $data = json_decode($result, true);
+            if ($data) {
+                $parsed = call_user_func($source['parser'], $data, $ispTranslations);
+                if ($parsed !== false) {
+                    return $parsed;
+                }
+            }
         }
-
-        $data = json_decode($response, true);
-        if ($data && $data['status'] == 'success') {
-            $location = ($data['city'] ? $data['city'] . ', ' : '') . $data['country'];
-            $isp = translateIsp($data['isp']);
-            return [$location, $isp];
-        }
-        return ['未知', '未知'];
-    } catch (Exception $e) {
-        return ['未知', '未知'];
     }
+    
+    // 所有API都失败，返回基础信息
+    return ['未知位置', '未知运营商'];
+}
+
+// 使用cURL进行API请求，提供更好的超时控制
+function makeApiRequest($url, $timeout = 3) {
+    // 检查cURL是否可用
+    if (!function_exists('curl_init')) {
+        // 如果cURL不可用，使用优化的file_get_contents
+        $context = stream_context_create([
+            'http' => [
+                'timeout' => $timeout,
+                'method' => 'GET',
+                'header' => "Connection: close\r\n",
+                'ignore_errors' => true
+            ]
+        ]);
+        return @file_get_contents($url, false, $context);
+    }
+    
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL => $url,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => $timeout,
+        CURLOPT_CONNECTTIMEOUT => 2,
+        CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_USERAGENT => 'LibreSpeed/1.0',
+        CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+        CURLOPT_HTTPHEADER => [
+            'Accept: application/json',
+            'Connection: close',
+            'Cache-Control: no-cache'
+        ]
+    ]);
+    
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $error = curl_error($ch);
+    curl_close($ch);
+    
+    // 检查响应是否有效
+    if ($response === false || $httpCode !== 200 || !empty($error)) {
+        return false;
+    }
+    
+    return $response;
+}
+
+// 解析ip-api.com的响应
+function parseIpApi($data, $ispTranslations) {
+    if (!isset($data['status']) || $data['status'] !== 'success') {
+        return false;
+    }
+    
+    $location = '';
+    if (!empty($data['city'])) {
+        $location .= $data['city'];
+    }
+    if (!empty($data['regionName']) && $data['regionName'] !== $data['city']) {
+        $location .= ($location ? ', ' : '') . $data['regionName'];
+    }
+    if (!empty($data['country'])) {
+        $location .= ($location ? ', ' : '') . $data['country'];
+    }
+    
+    $isp = $data['isp'] ?? '未知';
+    $isp = translateIspName($isp, $ispTranslations);
+    
+    return [$location ?: '未知', $isp];
+}
+
+// 解析ipapi.co的响应
+function parseIpApiCo($data, $ispTranslations) {
+    if (isset($data['error']) && $data['error']) {
+        return false;
+    }
+    
+    $location = '';
+    if (!empty($data['city'])) {
+        $location .= $data['city'];
+    }
+    if (!empty($data['region']) && $data['region'] !== $data['city']) {
+        $location .= ($location ? ', ' : '') . $data['region'];
+    }
+    if (!empty($data['country_name'])) {
+        $location .= ($location ? ', ' : '') . $data['country_name'];
+    }
+    
+    $isp = $data['org'] ?? '未知';
+    $isp = translateIspName($isp, $ispTranslations);
+    
+    return [$location ?: '未知', $isp];
+}
+
+// 优化的ISP名称翻译函数
+function translateIspName($isp, $translations) {
+    // 去掉常见的前缀如AS号码
+    $isp = preg_replace('/^AS\d+\s+/i', '', $isp);
+    
+    foreach ($translations as $en => $cn) {
+        if (stripos($isp, $en) !== false) {
+            return $cn;
+        }
+    }
+    return $isp;
+}
+
+// 处理异步IP信息请求
+if (isset($_GET['async_ip'])) {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    
+    if (isset($_GET['cors'])) {
+        header('Access-Control-Allow-Origin: *');
+        header('Access-Control-Allow-Methods: GET');
+    }
+    
+    try {
+        $ip = getUserIP();
+        
+        if (isPrivateOrLocalIP($ip)) {
+            echo json_encode([
+                'error' => false,
+                'ip' => $ip,
+                'location' => '本地, 中国',
+                'isp' => '本地网络'
+            ]);
+        } else {
+            list($location, $isp) = getIpInfo($ip);
+            echo json_encode([
+                'error' => false,
+                'ip' => $ip,
+                'location' => $location,
+                'isp' => $isp
+            ]);
+        }
+    } catch (Exception $e) {
+        echo json_encode([
+            'error' => true,
+            'message' => '获取IP信息失败: ' . $e->getMessage()
+        ]);
+    }
+    exit;
 }
 
 $userIP = getUserIP();
-// Handle local/private IPs for development
-$isPrivateIp = filter_var(
-    $userIP,
-    FILTER_VALIDATE_IP,
-    FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
-) === false;
 
-if ($userIP === '127.0.0.1' || $isPrivateIp) {
+// 优化的IP验证和分类
+function isPrivateOrLocalIP($ip) {
+    // IPv6本地地址
+    if ($ip === '::1') {
+        return true;
+    }
+    
+    // IPv4本地地址
+    if ($ip === '127.0.0.1' || strpos($ip, '127.') === 0) {
+        return true;
+    }
+    
+    // 使用PHP内置的私有IP检测
+    return filter_var(
+        $ip,
+        FILTER_VALIDATE_IP,
+        FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
+    ) === false;
+}
+
+// 检查是否为本地或私有IP
+if (isPrivateOrLocalIP($userIP)) {
     $userLocation = "本地, 中国";
     $userISP = "本地网络";
+    $isAsync = false;
+} elseif (isset($_GET['sync'])) {
+    // 明确要求同步获取IP信息
+    $maxWaitTime = 3;
+    $startTime = microtime(true);
+    
+    $oldTimeLimit = ini_get('max_execution_time');
+    ini_set('max_execution_time', 5);
+    
+    try {
+        list($userLocation, $userISP) = getIpInfo($userIP);
+        $elapsedTime = microtime(true) - $startTime;
+        
+        if (($userLocation === '未知位置' && $userISP === '未知运营商') || $elapsedTime > $maxWaitTime) {
+            $userLocation = "网络位置";
+            $userISP = "网络运营商";
+        }
+        $isAsync = false;
+    } catch (Exception $e) {
+        $userLocation = "网络位置";
+        $userISP = "网络运营商";
+        $elapsedTime = microtime(true) - $startTime;
+        $isAsync = false;
+    } finally {
+        ini_set('max_execution_time', $oldTimeLimit);
+    }
 } else {
-    list($userLocation, $userISP) = getIpInfo($userIP);
+    // 默认使用异步模式，页面立即加载
+    $userLocation = "正在获取...";
+    $userISP = "正在获取...";
+    $isAsync = true;
+    $elapsedTime = 0;
 }
 ?>
 
@@ -317,6 +542,7 @@ if ($userIP === '127.0.0.1' || $isPrivateIp) {
             backdrop-filter: blur(10px);
             border-radius: 0.75rem;
             padding: 1.5rem;
+            position: relative;
         }
 
         .info-title {
@@ -325,6 +551,39 @@ if ($userIP === '127.0.0.1' || $isPrivateIp) {
             display: flex;
             align-items: center;
             gap: 0.5rem;
+        }
+
+        .info-title:hover {
+            color: #3b82f6;
+        }
+
+        .info-title:active {
+            color: #2563eb;
+        }
+
+        .refresh-btn {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: #f8fafc;
+            color: #475569;
+            border: 1px solid #e2e8f0;
+            padding: 0.25rem 0.75rem;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .refresh-btn:hover {
+            background: #f1f5f9;
+            border-color: #cbd5e1;
+            color: #334155;
+        }
+
+        .refresh-btn:active {
+            background: #e2e8f0;
         }
 
         .info-item {
@@ -540,11 +799,17 @@ if ($userIP === '127.0.0.1' || $isPrivateIp) {
             <!-- Info Cards -->
             <div class="info-grid">
                 <div class="info-card">
-                    <h3 class="info-title">
+                    <button class="refresh-btn" onclick="refreshPage()" title="刷新页面">
+                        刷新
+                    </button>
+                    <h3 class="info-title" id="connection-info-title" onclick="toggleMode()" style="cursor: pointer; user-select: none; transition: color 0.3s ease;" title="点击切换同步/异步模式">
                         <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
                             <path d="M20 3H4c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h3l-1 1v2h12v-2l-1-1h3c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM4 14V5h16v9H4z"/>
                         </svg>
                         连接信息
+                        <span id="mode-indicator" style="font-size: 0.75rem; color: #64748b; margin-left: 0.5rem; font-weight: normal;">
+                            <?php echo isset($_GET['sync']) ? '(同步模式)' : '(异步模式)'; ?>
+                        </span>
                     </h3>
                     <div class="info-item">
                         <span class="info-label">IP 地址:</span>
@@ -558,6 +823,19 @@ if ($userIP === '127.0.0.1' || $isPrivateIp) {
                         <span class="info-label">运营商:</span>
                         <span class="info-value"><?php echo $userISP; ?></span>
                     </div>
+                    <!-- 添加调试信息，可在生产环境中删除 -->
+                    <?php if (isset($_GET['debug'])): ?>
+                    <div class="info-item" style="font-size: 0.75rem; color: #9ca3af;">
+                        <span class="info-label">调试:</span>
+                        <span class="info-value">
+                            IP类型: <?php echo isPrivateOrLocalIP($userIP) ? '本地/私有' : '公网'; ?>
+                            | 原始IP: <?php echo $_SERVER['REMOTE_ADDR'] ?? 'N/A'; ?>
+                            <?php if (isset($elapsedTime)): ?>
+                            | 获取时间: <?php echo number_format($elapsedTime, 2); ?>s
+                            <?php endif; ?>
+                        </span>
+                    </div>
+                    <?php endif; ?>
                 </div>
 
                 <div class="info-card">
@@ -615,6 +893,20 @@ if ($userIP === '127.0.0.1' || $isPrivateIp) {
         let isTestRunning = false;
         let s = new Speedtest();
         let testData = {};
+        let lastUpdateTime = 0; // 用于防抖的时间戳
+        
+        // 防抖函数，减少频繁的UI更新
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
 
         function startSpeedTest() {
             if (isTestRunning) {
@@ -635,42 +927,77 @@ if ($userIP === '127.0.0.1' || $isPrivateIp) {
                 if (!isTestRunning) return;
                 testData = data;
                 let status = data.testState;
-                if (status === 1) { // Download test
-                    document.getElementById('progress-text').textContent = '正在测试下载速度...';
-                    updateProgress(Math.round(data.dlProgress * 100));
-                    document.getElementById('download-speed').textContent = data.dlStatus;
-                }
-                if (status === 2) { // Ping test
-                    document.getElementById('progress-text').textContent = '正在测试延迟...';
-                    updateProgress(Math.round(data.pingProgress * 100));
-                    document.getElementById('ping-value').textContent = data.pingStatus;
-                    document.getElementById('jitter-info').textContent = `抖动: ${data.jitterStatus}ms`;
-                }
-                if (status === 3) { // Upload test
-                    document.getElementById('progress-text').textContent = '正在测试上传速度...';
-                    updateProgress(Math.round(data.ulProgress * 100));
-                    document.getElementById('upload-speed').textContent = data.ulStatus;
-                }
+                
+                // 使用requestAnimationFrame优化UI更新，防止阻塞主线程
+                requestAnimationFrame(function() {
+                    if (status === 1) { // Download test
+                        document.getElementById('progress-text').textContent = '正在测试下载速度...';
+                        updateProgress(Math.round(data.dlProgress * 100));
+                        if (data.dlStatus && data.dlStatus !== '0.00') {
+                            document.getElementById('download-speed').textContent = data.dlStatus;
+                        }
+                    }
+                    if (status === 2) { // Ping test
+                        document.getElementById('progress-text').textContent = '正在测试延迟...';
+                        updateProgress(Math.round(data.pingProgress * 100));
+                        if (data.pingStatus) {
+                            document.getElementById('ping-value').textContent = data.pingStatus;
+                        }
+                        if (data.jitterStatus) {
+                            document.getElementById('jitter-info').textContent = `抖动: ${data.jitterStatus}ms`;
+                        }
+                    }
+                    if (status === 3) { // Upload test
+                        document.getElementById('progress-text').textContent = '正在测试上传速度...';
+                        updateProgress(Math.round(data.ulProgress * 100));
+                        if (data.ulStatus && data.ulStatus !== '0.00') {
+                            document.getElementById('upload-speed').textContent = data.ulStatus;
+                        }
+                    }
+                });
             };
             
             s.onend = function(aborted) {
                 isTestRunning = false;
                 if (aborted) {
                     console.log("测试已中止");
-                    document.getElementById('testing-state').classList.add('hidden');
-                    document.getElementById('initial-state').classList.remove('hidden');
+                    // 使用requestAnimationFrame优化UI更新
+                    requestAnimationFrame(() => {
+                        document.getElementById('testing-state').classList.add('hidden');
+                        document.getElementById('initial-state').classList.remove('hidden');
+                    });
                     return;
                 }
-                showResults(testData);
+                
+                // 添加错误处理
+                try {
+                    showResults(testData);
+                } catch (error) {
+                    console.error('显示测试结果时出错:', error);
+                    // 如果出错，显示错误信息
+                    requestAnimationFrame(() => {
+                        document.getElementById('progress-text').textContent = '测试完成，但显示结果时出错';
+                        document.getElementById('testing-state').classList.add('hidden');
+                        document.getElementById('initial-state').classList.remove('hidden');
+                    });
+                }
             };
 
             s.start();
         }
 
-        function updateProgress(progress) {
-            document.getElementById('progress-fill').style.width = progress + '%';
-            document.getElementById('progress-percent').textContent = progress + '%';
-        }
+        // 优化的进度更新函数，使用防抖和requestAnimationFrame
+        const updateProgress = debounce(function(progress) {
+            const now = Date.now();
+            // 限制更新频率为最多60fps
+            if (now - lastUpdateTime < 16) return; // ~60fps
+            lastUpdateTime = now;
+            
+            requestAnimationFrame(() => {
+                document.getElementById('progress-fill').style.width = progress + '%';
+                document.getElementById('progress-percent').textContent = progress + '%';
+            });
+        }, 50);
 
         function showResults(results) {
             const downloadSpeed = parseFloat(results.dlStatus) || 0;
@@ -678,24 +1005,27 @@ if ($userIP === '127.0.0.1' || $isPrivateIp) {
             const pingValue = parseFloat(results.pingStatus) || 0;
             const jitterValue = parseFloat(results.jitterStatus) || 0;
 
-            // Update result values
-            document.getElementById('download-speed').textContent = downloadSpeed.toFixed(2);
-            document.getElementById('upload-speed').textContent = uploadSpeed.toFixed(2);
-            document.getElementById('ping-value').textContent = pingValue.toFixed(2);
-            document.getElementById('jitter-info').textContent = `抖动: ${jitterValue.toFixed(2)}ms`;
-            
-            // Update badges
-            const downloadBadge = getSpeedLevel(downloadSpeed);
-            document.getElementById('download-badge').textContent = downloadBadge.level;
-            document.getElementById('download-badge').className = 'result-badge ' + downloadBadge.class;
-            
-            const uploadBadge = getSpeedLevel(uploadSpeed);
-            document.getElementById('upload-badge').textContent = uploadBadge.level;
-            document.getElementById('upload-badge').className = 'result-badge ' + uploadBadge.class;
-            
-            // Hide testing state, show results
-            document.getElementById('testing-state').classList.add('hidden');
-            document.getElementById('results-state').classList.add('show');
+            // 使用requestAnimationFrame批量更新结果显示，减少DOM重绘
+            requestAnimationFrame(() => {
+                // Update result values
+                document.getElementById('download-speed').textContent = downloadSpeed.toFixed(2);
+                document.getElementById('upload-speed').textContent = uploadSpeed.toFixed(2);
+                document.getElementById('ping-value').textContent = pingValue.toFixed(2);
+                document.getElementById('jitter-info').textContent = `抖动: ${jitterValue.toFixed(2)}ms`;
+                
+                // Update badges
+                const downloadBadge = getSpeedLevel(downloadSpeed);
+                document.getElementById('download-badge').textContent = downloadBadge.level;
+                document.getElementById('download-badge').className = 'result-badge ' + downloadBadge.class;
+                
+                const uploadBadge = getSpeedLevel(uploadSpeed);
+                document.getElementById('upload-badge').textContent = uploadBadge.level;
+                document.getElementById('upload-badge').className = 'result-badge ' + uploadBadge.class;
+                
+                // Hide testing state, show results
+                document.getElementById('testing-state').classList.add('hidden');
+                document.getElementById('results-state').classList.add('show');
+            });
         }
 
         function getSpeedLevel(speed) {
@@ -703,6 +1033,27 @@ if ($userIP === '127.0.0.1' || $isPrivateIp) {
             if (speed >= 25) return { level: '良好', class: 'badge-good' };
             if (speed >= 10) return { level: '一般', class: 'badge-average' };
             return { level: '较慢', class: 'badge-poor' };
+        }
+
+        function refreshPage() {
+            window.location.reload();
+        }
+
+        // 切换同步/异步模式
+        function toggleMode() {
+            const currentUrl = new URL(window.location);
+            const isCurrentlySync = currentUrl.searchParams.has('sync');
+            
+            if (isCurrentlySync) {
+                // 当前是同步模式，切换到异步模式
+                currentUrl.searchParams.delete('sync');
+            } else {
+                // 当前是异步模式，切换到同步模式
+                currentUrl.searchParams.set('sync', '1');
+            }
+            
+            // 跳转到新URL
+            window.location.href = currentUrl.toString();
         }
 
         // Credits Modal Logic
@@ -724,6 +1075,48 @@ if ($userIP === '127.0.0.1' || $isPrivateIp) {
                 creditsModalOverlay.classList.remove('show');
             }
         });
+        
+        // 异步加载IP信息
+        <?php if ($isAsync): ?>
+        function loadIpInfoAsync() {
+            // 使用同步模式相同的API逻辑，确保显示中文信息
+            fetch('?async_ip=1')
+                .then(response => response.json())
+                .then(data => {
+                    if (data && !data.error) {
+                        updateIpInfo(data.location || '网络位置', data.isp || '网络运营商');
+                    } else {
+                        updateIpInfo('网络位置', '网络运营商');
+                    }
+                })
+                .catch(error => {
+                    console.warn('加载IP信息失败:', error);
+                    updateIpInfo('网络位置', '网络运营商');
+                });
+        }
+        
+        function updateIpInfo(location, isp) {
+            const infoItems = document.querySelectorAll('.info-item');
+            
+            infoItems.forEach(item => {
+                const label = item.querySelector('.info-label');
+                const value = item.querySelector('.info-value');
+                
+                if (label && value) {
+                    if (label.textContent.includes('位置')) {
+                        value.textContent = location;
+                    } else if (label.textContent.includes('运营商')) {
+                        value.textContent = isp;
+                    }
+                }
+            });
+        }
+        
+        // 页面加载完成后异步加载IP信息
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(loadIpInfoAsync, 100); // 稍微延迟以确保页面元素已加载
+        });
+        <?php endif; ?>
     </script>
 </body>
 </html>
