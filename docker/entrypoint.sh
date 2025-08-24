@@ -18,7 +18,6 @@ cp /speedtest/favicon.ico /var/www/html/
 
 # Copy additional PHP files
 cp /speedtest/get_ip_async.php /var/www/html/ 2>/dev/null || true
-cp /speedtest/test_api.php /var/www/html/ 2>/dev/null || true
 
 # Set custom webroot on alpine
 if is_alpine; then

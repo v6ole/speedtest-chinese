@@ -9,7 +9,7 @@ if (isset($_GET['cors'])) {
     header('Access-Control-Allow-Methods: GET');
 }
 
-// 获取用户IP的函数
+// 获取用户IP的函数（复制自ui.php）
 function getUserIP() {
     $ipHeaders = [
         'HTTP_CF_CONNECTING_IP',
