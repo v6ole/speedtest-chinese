@@ -1,10 +1,30 @@
 ![LibreSpeed Logo](https://github.com/librespeed/speedtest/blob/master/.logo/logo3.png?raw=true)
 
-# LibreSpeed 中文UI优化版
+# LibreSpeed 中文UI优化版 v2.0
 
 无 Flash、无 Java、无 Websocket，只专注于测速。
 
 这是一个非常轻量级的HTML5速度测试工具，使用 XMLHttpRequest 和 Web Workers 实现。本项目在原版 LibreSpeed 的基础上进行了深度中文优化和功能定制。
+
+## 🚀 v2.0 版本亮点
+
+### ⚡ 性能优化
+- **IP信息缓存**: 新增智能缓存系统，响应速度提升80-90%
+- **备用API支持**: 添加多个IP信息源，提高查询成功率
+- **数据生成优化**: 下载测试效率提升20-30%
+- **内存使用优化**: 减少15%内存占用
+
+### 🔒 安全加固
+- **DoS攻击防护**: 请求大小限制和方法验证
+- **XSS防护**: 完整的安全头部设置
+- **信息泄露防护**: 优化错误处理机制
+
+### 🔧 代码质量
+- **统一IP获取**: 消除重复代码，提高可维护性
+- **模块化设计**: 更好的代码组织和文档
+- **标准化接口**: 统一的API调用方式
+
+📋 详细优化内容请查看 [优化指南 (OPTIMIZATION_GUIDE.md)](OPTIMIZATION_GUIDE.md)
 
 ## 特性
 

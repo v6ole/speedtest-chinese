@@ -296,25 +296,93 @@ function getIp(done) {
 	if (ipCalled) return;
 	else ipCalled = true; // getIp already called?
 	let startT = new Date().getTime();
-	xhr = new XMLHttpRequest();
-	xhr.onload = function() {
-		tlog("IP: " + xhr.responseText + ", took " + (new Date().getTime() - startT) + "ms");
-		try {
-			const data = JSON.parse(xhr.responseText);
-			clientIp = data.processedString;
-			ispInfo = data.rawIspInfo;
-		} catch (e) {
-			clientIp = xhr.responseText;
+	
+	// 增强的错误处理和安全检查
+	try {
+		xhr = new XMLHttpRequest();
+		
+		// 设置超时
+		xhr.timeout = 10000; // 10秒超时
+		
+		xhr.onload = function() {
+			try {
+				const responseTime = new Date().getTime() - startT;
+				tlog("IP: " + xhr.responseText + ", took " + responseTime + "ms");
+				
+				// 验证响应内容
+				if (!xhr.responseText || xhr.responseText.length > 1000) {
+					twarn("Invalid IP response length");
+					clientIp = "Unknown";
+					ispInfo = "";
+					done();
+					return;
+				}
+				
+				try {
+					const data = JSON.parse(xhr.responseText);
+					// 验证JSON结构
+					if (data && typeof data.processedString === 'string') {
+						clientIp = data.processedString;
+						ispInfo = data.rawIspInfo || "";
+					} else {
+						// JSON格式无效，使用原始文本
+						clientIp = xhr.responseText.substring(0, 100); // 限制长度
+						ispInfo = "";
+					}
+				} catch (jsonError) {
+					// JSON解析失败，使用原始响应
+					tverb("JSON parse failed, using raw response");
+					clientIp = xhr.responseText.substring(0, 100);
+					ispInfo = "";
+				}
+			} catch (loadError) {
+				twarn("Error processing IP response: " + loadError.message);
+				clientIp = "Error";
+				ispInfo = "";
+			}
+			done();
+		};
+		
+		xhr.onerror = function() {
+			const responseTime = new Date().getTime() - startT;
+			tlog("getIp failed, took " + responseTime + "ms");
+			clientIp = "Network Error";
 			ispInfo = "";
+			done();
+		};
+		
+		xhr.ontimeout = function() {
+			const responseTime = new Date().getTime() - startT;
+			tlog("getIp timeout, took " + responseTime + "ms");
+			clientIp = "Timeout";
+			ispInfo = "";
+			done();
+		};
+		
+		// 构建安全的URL
+		const baseUrl = settings.url_getIp;
+		const params = [];
+		
+		if (settings.mpot) params.push("cors=true");
+		if (settings.getIp_ispInfo) {
+			params.push("isp=true");
+			if (settings.getIp_ispInfo_distance) {
+				params.push("distance=" + encodeURIComponent(settings.getIp_ispInfo_distance));
+			}
 		}
+		params.push("r=" + Math.random());
+		
+		const url = baseUrl + url_sep(baseUrl) + params.join("&");
+		
+		xhr.open("GET", url, true);
+		xhr.send();
+		
+	} catch (error) {
+		twarn("Failed to create IP request: " + error.message);
+		clientIp = "Init Error";
+		ispInfo = "";
 		done();
-	};
-	xhr.onerror = function() {
-		tlog("getIp failed, took " + (new Date().getTime() - startT) + "ms");
-		done();
-	};
-	xhr.open("GET", settings.url_getIp + url_sep(settings.url_getIp) + (settings.mpot ? "cors=true&" : "") + (settings.getIp_ispInfo ? "isp=true" + (settings.getIp_ispInfo_distance ? "&distance=" + settings.getIp_ispInfo_distance + "&" : "&") : "&") + "r=" + Math.random(), true);
-	xhr.send();
+	}
 }
 // download test, calls done function when it's over
 let dlCalled = false; // used to prevent multiple accidental calls to dlTest
