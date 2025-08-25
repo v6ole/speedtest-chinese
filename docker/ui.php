@@ -373,7 +373,7 @@ if (isPrivateOrLocalIP($userIP)) {
             width: 8rem;
             height: 8rem;
             margin: 0 auto 1.5rem;
-            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            background-image: linear-gradient(-225deg, #22E1FF 0%, #1D8FE1 48%, #625EB1 100%);
             border-radius: 50%;
             display: flex;
             align-items: center;
@@ -391,7 +391,7 @@ if (isPrivateOrLocalIP($userIP)) {
         }
 
         .start-btn {
-            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            background-image: linear-gradient(-225deg, #22E1FF 0%, #1D8FE1 48%, #625EB1 100%);
             color: white;
             border: none;
             padding: 0.75rem 2rem;
@@ -437,7 +437,7 @@ if (isPrivateOrLocalIP($userIP)) {
 
         .progress-fill {
             height: 100%;
-            background: linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%);
+            background: linear-gradient(-225deg, #22E1FF 0%, #1D8FE1 48%, #625EB1 100%);
             border-radius: 9999px;
             transition: width 0.3s ease;
             width: 0%;
