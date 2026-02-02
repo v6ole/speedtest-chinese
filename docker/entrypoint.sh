@@ -4,11 +4,12 @@ set -e
 set -x
 
 is_alpine() {
-  [ -f /etc/alpine-release ]
+    [ -f /etc/alpine-release ]
 }
 
-# Cleanup
-rm -rf /var/www/html/*
+# Cleanup - 移除除挂载文件外的所有内容
+# 注意：挂载的文件无法被删除，会显示 "Device or resource busy" 错误，这是正常行为
+rm -rf /var/www/html/* 2>/dev/null || true
 
 # Copy frontend files
 cp /speedtest/*.js /var/www/html/
@@ -97,9 +98,9 @@ if [[ "$TELEMETRY" == "true" && ("$MODE" == "frontend" || "$MODE" == "standalone
 fi
 
 if is_alpine; then
-  chown -R apache /var/www/html/*
+    chown -R apache /var/www/html/ 2>/dev/null || true
 else
-  chown -R www-data /var/www/html/*
+    chown -R www-data /var/www/html/ 2>/dev/null || true
 fi
 
 # Allow selection of Apache port for network_mode: host
