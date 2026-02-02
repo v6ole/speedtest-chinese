@@ -300,6 +300,16 @@ if (isPrivateOrLocalIP($userIP)) {
     $isAsync = true;
     $elapsedTime = 0;
 }
+
+// 读取servers.json文件以支持多节点
+$serverListFile = __DIR__ . '/servers.json';
+$serverListJson = '[]';
+if (file_exists($serverListFile)) {
+    $jsonContent = file_get_contents($serverListFile);
+    if (json_decode($jsonContent) !== null) {
+        $serverListJson = $jsonContent;
+    }
+}
 ?>
 
 <!DOCTYPE html>
@@ -726,6 +736,14 @@ if (isPrivateOrLocalIP($userIP)) {
             <div class="speed-card">
                 <!-- Initial State -->
                 <div id="initial-state" class="test-initial">
+                    <!-- 服务器选择下拉框（多节点模式） -->
+                    <div id="server-selection" style="text-align: center; margin-bottom: 1.5rem; display: none;">
+                        <label for="server-select" style="margin-right: 0.5rem; color: #64748b;">选择测速节点:</label>
+                        <select id="server-select" onchange="changeServer()" style="padding: 0.5rem 1rem; border-radius: 0.5rem; border: 1px solid #e2e8f0; font-size: 1rem; min-width: 200px; cursor: pointer;">
+                        </select>
+                        <div id="server-loading" style="margin-top: 0.5rem; font-size: 0.875rem; color: #64748b;">正在选择最佳节点...</div>
+                    </div>
+                    
                     <div class="test-icon" id="test-icon">
                         <svg width="64" height="64" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
                            <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
@@ -890,6 +908,10 @@ if (isPrivateOrLocalIP($userIP)) {
 
     <script type="text/javascript" src="/speedtest.js"></script>
     <script>
+        // 从PHP读取的服务器列表（支持多节点）
+        var SPEEDTEST_SERVERS = <?php echo $serverListJson; ?>;
+        
+        let selectedServerIndex = 0;
         let isTestRunning = false;
         let s = new Speedtest();
         let testData = {};
@@ -908,10 +930,79 @@ if (isPrivateOrLocalIP($userIP)) {
             };
         }
 
+        // 初始化服务器列表（从servers.json读取）
+        function initServerList() {
+            const select = document.getElementById('server-select');
+            const container = document.getElementById('server-selection');
+            
+            // 检查是否有多个服务器或是否需要显示选择器
+            if (!select || !container) return;
+            
+            if (SPEEDTEST_SERVERS && SPEEDTEST_SERVERS.length > 0) {
+                // 显示服务器选择区域
+                container.style.display = 'block';
+                
+                // 添加服务器选项
+                SPEEDTEST_SERVERS.forEach((server, index) => {
+                    const option = document.createElement('option');
+                    option.value = index;
+                    option.textContent = server.name || '服务器 ' + (index + 1);
+                    select.appendChild(option);
+                });
+                
+                // 添加测试点到speedtest对象
+                s.addTestPoints(SPEEDTEST_SERVERS);
+                
+                // 自动选择最佳服务器
+                s.selectServer(function(server) {
+                    const loading = document.getElementById('server-loading');
+                    if (server && loading) {
+                        loading.textContent = '已选择: ' + server.name + ' (自动选择延迟最低的节点)';
+                        loading.style.color = '#10b981';
+                        
+                        // 在下拉框中选中该服务器
+                        for (let i = 0; i < select.options.length; i++) {
+                            if (select.options[i].textContent === server.name) {
+                                select.selectedIndex = i;
+                                selectedServerIndex = i;
+                                break;
+                            }
+                        }
+                    } else if (loading) {
+                        loading.textContent = '无法连接到任何测速节点';
+                        loading.style.color = '#ef4444';
+                    }
+                });
+            }
+        }
+
+        // 切换服务器
+        function changeServer() {
+            const select = document.getElementById('server-select');
+            if (!select) return;
+            
+            selectedServerIndex = parseInt(select.value);
+            const server = SPEEDTEST_SERVERS[selectedServerIndex];
+            
+            if (server) {
+                s.setSelectedServer(server);
+                const loading = document.getElementById('server-loading');
+                if (loading) {
+                    loading.textContent = '已切换到: ' + server.name;
+                    loading.style.color = '#64748b';
+                }
+            }
+        }
+
         function startSpeedTest() {
             if (isTestRunning) {
                 s.abort();
                 return;
+            }
+            
+            // 确保使用选中的服务器
+            if (typeof selectedServerIndex !== 'undefined' && SPEEDTEST_SERVERS && SPEEDTEST_SERVERS[selectedServerIndex]) {
+                s.setSelectedServer(SPEEDTEST_SERVERS[selectedServerIndex]);
             }
             
             isTestRunning = true;
@@ -1076,8 +1167,8 @@ if (isPrivateOrLocalIP($userIP)) {
             }
         });
         
-        // 异步加载IP信息
         <?php if ($isAsync): ?>
+        // 异步加载IP信息
         function loadIpInfoAsync() {
             // 使用同步模式相同的API逻辑，确保显示中文信息
             fetch('?async_ip=1')
@@ -1094,6 +1185,7 @@ if (isPrivateOrLocalIP($userIP)) {
                     updateIpInfo('网络位置', '网络运营商');
                 });
         }
+        <?php endif; ?>
         
         function updateIpInfo(location, isp) {
             const infoItems = document.querySelectorAll('.info-item');
@@ -1112,11 +1204,16 @@ if (isPrivateOrLocalIP($userIP)) {
             });
         }
         
-        // 页面加载完成后异步加载IP信息
+        // 页面加载完成后初始化服务器列表
         document.addEventListener('DOMContentLoaded', function() {
+            // 初始化服务器列表（支持多节点）
+            initServerList();
+            
+            <?php if ($isAsync): ?>
+            // 异步加载IP信息
             setTimeout(loadIpInfoAsync, 100); // 稍微延迟以确保页面元素已加载
+            <?php endif; ?>
         });
-        <?php endif; ?>
     </script>
 </body>
 </html>
